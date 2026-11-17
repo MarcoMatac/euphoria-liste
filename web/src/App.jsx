@@ -579,25 +579,178 @@ const AdminEventReport = ({ registrations, selectedEvent, setView }) => {
 };
 
 const AdminContacts = ({ registrations, events, waLogs, view, setView, setIsAdminAuth, showDialog }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedContacts, setSelectedContacts] = useState(new Set());
+
   const getUniqueContacts = () => {
     const contactsMap = new Map();
     registrations.forEach(reg => {
       let key = (reg.phone || '').replace(/\D/g, ''); 
       if (key.length < 5) key = (reg.email || '').trim().toLowerCase() || `${reg.firstName || ''} ${reg.lastName || ''}`.trim().toLowerCase();
-      if (!contactsMap.has(key)) contactsMap.set(key, { id: key, firstName: reg.firstName, lastName: reg.lastName, phone: reg.phone, email: reg.email, registrationCount: reg.isCancelled ? 0 : 1, lastSeen: reg.timestamp });
-      else { const existing = contactsMap.get(key); if (!reg.isCancelled) existing.registrationCount += 1; if (reg.timestamp > existing.lastSeen) existing.lastSeen = reg.timestamp; }
+      
+      if (!contactsMap.has(key)) {
+        contactsMap.set(key, { 
+          id: key, 
+          docIds: [reg.id],
+          firstName: reg.firstName, 
+          lastName: reg.lastName, 
+          phone: reg.phone, 
+          email: reg.email, 
+          registrationCount: reg.isCancelled ? 0 : 1, 
+          lastSeen: reg.timestamp 
+        });
+      } else { 
+        const existing = contactsMap.get(key); 
+        existing.docIds.push(reg.id);
+        if (!reg.isCancelled) existing.registrationCount += 1; 
+        if (reg.timestamp > existing.lastSeen) {
+          existing.lastSeen = reg.timestamp; 
+          existing.phone = reg.phone || existing.phone;
+          existing.email = reg.email || existing.email;
+        }
+      }
     });
-    return Array.from(contactsMap.values()).sort((a, b) => a.firstName.localeCompare(b.firstName));
+    return Array.from(contactsMap.values()).sort((a, b) => (a.firstName || '').localeCompare(b.firstName || ''));
   };
-  const uniqueContacts = getUniqueContacts();
+
+  let uniqueContacts = getUniqueContacts();
+  if (searchTerm) {
+    uniqueContacts = uniqueContacts.filter(c => 
+      `${c.firstName} ${c.lastName} ${c.phone} ${c.email}`.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }
+
+  const toggleContact = (id) => {
+    const newSet = new Set(selectedContacts);
+    if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
+    setSelectedContacts(newSet);
+  };
+
+  const toggleAll = () => {
+    if (selectedContacts.size === uniqueContacts.length && uniqueContacts.length > 0) {
+      setSelectedContacts(new Set());
+    } else {
+      setSelectedContacts(new Set(uniqueContacts.map(c => c.id)));
+    }
+  };
+
+  const handleDeleteSingleContact = (contact, e) => {
+    e.stopPropagation();
+    showDialog(`Eliminare definitivamente "${contact.firstName} ${contact.lastName}" dal database?`, async () => {
+      try {
+        await Promise.all(contact.docIds.map(docId => deleteDoc(doc(db, 'artifacts', appId, 'registrations', docId))));
+        const newSet = new Set(selectedContacts);
+        newSet.delete(contact.id);
+        setSelectedContacts(newSet);
+      } catch (error) {
+        console.error(error);
+        showDialog("Errore durante l'eliminazione del contatto.");
+      }
+    });
+  };
+
+  const handleDeleteSelectedContacts = () => {
+    if (selectedContacts.size === 0) return;
+    showDialog(`Eliminare definitivamente i ${selectedContacts.size} contatti selezionati dal database?`, async () => {
+      try {
+        const contactsToDelete = uniqueContacts.filter(c => selectedContacts.has(c.id));
+        const allDocIds = contactsToDelete.flatMap(c => c.docIds);
+        await Promise.all(allDocIds.map(docId => deleteDoc(doc(db, 'artifacts', appId, 'registrations', docId))));
+        setSelectedContacts(new Set());
+      } catch (error) {
+        console.error(error);
+        showDialog("Errore durante l'eliminazione multipla.");
+      }
+    });
+  };
+
+  const exportCSV = () => {
+    const headers = ["Nome", "Cognome", "Telefono", "Email", "Serate"];
+    const csvData = uniqueContacts.map(c => [c.firstName, c.lastName, c.phone || '', c.email || '', c.registrationCount].map(field => `"${field}"`).join(","));
+    const blob = new Blob([[headers.join(","), ...csvData].join("\n")], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a"); link.setAttribute("href", URL.createObjectURL(blob)); link.setAttribute("download", "database_euphoria.csv"); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
 
   return (
-    <div className="max-w-6xl mx-auto p-4 space-y-4 mb-12">
+    <div className="max-w-6xl mx-auto p-4 space-y-6 mb-12">
       <AdminHeader view={view} setView={setView} setIsAdminAuth={setIsAdminAuth} />
-      <div className="bg-[#0a101d] border border-[#ebdfc4]/10 rounded-md shadow-lg overflow-hidden">
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left border-collapse"><thead><tr className="border-b border-[#ebdfc4]/10 bg-[#05080f]"><th className="p-5 text-[10px] font-bold text-[#ebdfc4]/50 uppercase tracking-[0.2em]">Nome</th><th className="p-5 text-[10px] font-bold text-[#ebdfc4]/50 uppercase tracking-[0.2em]">Contatti</th><th className="p-5 text-[10px] font-bold text-[#ebdfc4]/50 uppercase tracking-[0.2em] text-center">Serate</th></tr></thead><tbody>{uniqueContacts.map((c) => (<tr key={c.id} className="border-b border-[#ebdfc4]/5 hover:bg-[#121a2f]"><td className="p-5"><div className="font-medium text-xs text-[#ebdfc4] uppercase tracking-widest">{c.firstName} {c.lastName}</div></td><td className="p-5"><div className="text-[#ebdfc4]/90 text-xs tracking-wider">{c.phone}</div></td><td className="p-5 text-center"><span className="text-[#cfa968] font-bold text-xs">{c.registrationCount}</span></td></tr>))}</tbody></table>
+      
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 border-b border-[#ebdfc4]/10 pb-8 mb-6">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-light text-[#ebdfc4] uppercase tracking-[0.15em] flex items-center mb-2">Database Contatti</h1>
+          <p className="text-[#ebdfc4]/50 text-xs font-bold tracking-[0.2em] uppercase">Anagrafiche Clienti</p>
         </div>
+        <div className="text-left md:text-right">
+          <div className="text-3xl font-light text-[#ebdfc4]">{getUniqueContacts().length}</div>
+          <div className="text-[#ebdfc4]/50 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">Totali</div>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-4 mb-6">
+        <div className="relative flex-1">
+          <Search className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 text-[#ebdfc4]/50" />
+          <input type="text" placeholder="CERCA PER NOME, TELEFONO O EMAIL..." className="w-full bg-transparent border-b border-[#ebdfc4]/30 pl-8 pr-4 py-3 text-[#ebdfc4] focus:outline-none focus:border-[#cfa968] text-xs uppercase tracking-[0.1em] transition-colors" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        </div>
+        <div className="flex gap-3 shrink-0">
+          {selectedContacts.size > 0 && (
+            <button onClick={handleDeleteSelectedContacts} className="flex items-center justify-center bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-5 py-3 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors">
+              <Trash2 className="w-4 h-4 mr-2" /> Elimina ({selectedContacts.size})
+            </button>
+          )}
+          <button onClick={exportCSV} title="Scarica Excel/CSV" className="flex items-center justify-center border border-[#ebdfc4]/20 hover:bg-[#ebdfc4]/10 text-[#ebdfc4]/70 hover:text-[#ebdfc4] px-5 py-3 rounded-sm text-[10px] font-bold uppercase tracking-widest transition-colors">
+            <Download className="w-4 h-4 mr-2" /> CSV
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-[#0a101d] border border-[#ebdfc4]/10 rounded-md shadow-lg overflow-hidden">
+        {uniqueContacts.length === 0 ? (
+          <div className="p-16 text-center text-[#ebdfc4]/40 text-xs uppercase tracking-widest">Nessun contatto trovato.</div>
+        ) : (
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-[#ebdfc4]/10 bg-[#05080f]">
+                  <th className="p-5 w-12 text-center">
+                    <div onClick={toggleAll} className="w-4 h-4 rounded-sm border border-[#ebdfc4]/30 mx-auto flex items-center justify-center cursor-pointer hover:border-[#cfa968] transition-colors">
+                      {selectedContacts.size === uniqueContacts.length && uniqueContacts.length > 0 && <CheckSquare className="w-3.5 h-3.5 text-[#cfa968]"/>}
+                      {selectedContacts.size > 0 && selectedContacts.size < uniqueContacts.length && <div className="w-2 h-2 bg-[#cfa968] rounded-[1px]"/>}
+                    </div>
+                  </th>
+                  <th className="p-5 text-[10px] font-bold text-[#ebdfc4]/50 uppercase tracking-[0.2em]">Nome</th>
+                  <th className="p-5 text-[10px] font-bold text-[#ebdfc4]/50 uppercase tracking-[0.2em]">Contatti</th>
+                  <th className="p-5 text-[10px] font-bold text-[#ebdfc4]/50 uppercase tracking-[0.2em] text-center">Serate</th>
+                  <th className="p-5 text-[10px] font-bold text-[#ebdfc4]/50 uppercase tracking-[0.2em] text-center">Elimina</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uniqueContacts.map((c) => {
+                  const isSelected = selectedContacts.has(c.id);
+                  return (
+                    <tr key={c.id} onClick={() => toggleContact(c.id)} className={`border-b border-[#ebdfc4]/5 transition-colors cursor-pointer ${isSelected ? 'bg-[#cfa968]/10' : 'hover:bg-[#121a2f]'}`}>
+                      <td className="p-5 text-center">
+                        <div className={`w-4 h-4 rounded-sm border mx-auto flex items-center justify-center transition-all ${isSelected ? 'border-[#cfa968] bg-[#cfa968]/20 text-[#cfa968]' : 'border-[#ebdfc4]/30 bg-transparent'}`}>
+                          {isSelected && <CheckSquare className="w-3.5 h-3.5"/>}
+                        </div>
+                      </td>
+                      <td className="p-5"><div className="font-medium text-xs text-[#ebdfc4] uppercase tracking-widest">{c.firstName} {c.lastName}</div></td>
+                      <td className="p-5">
+                        <div className="text-[#ebdfc4]/90 text-xs tracking-wider">{c.phone || '-'}</div>
+                        {c.email && <div className="text-[#ebdfc4]/50 text-[10px] mt-1">{c.email}</div>}
+                      </td>
+                      <td className="p-5 text-center"><span className="text-[#cfa968] font-bold text-xs">{c.registrationCount}</span></td>
+                      <td className="p-5 text-center">
+                        <button onClick={(e) => handleDeleteSingleContact(c, e)} className="text-[#ebdfc4]/40 hover:text-red-400 p-2 transition-colors" title="Elimina contatto">
+                          <Trash2 className="w-4 h-4 inline" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
