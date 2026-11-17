@@ -9,14 +9,26 @@ import {
 // ============================================================================
 //  IMPOSTAZIONI PRINCIPALI
 // ============================================================================
-const ADMIN_PIN = '1230'; 
+const ADMIN_PIN = '4562'; 
 const appId = 'euphoria-liste';
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, query, onSnapshot, addDoc, doc, updateDoc, deleteDoc, getDocs, where } from 'firebase/firestore';
+import { getAuth, signInAnonymously } from 'firebase/auth';
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager,
+  collection, 
+  query, 
+  onSnapshot, 
+  addDoc, 
+  doc, 
+  updateDoc, 
+  deleteDoc, 
+  getDocs, 
+  where 
+} from 'firebase/firestore';
 
-// ⚠️ INCOLLA QUI I TUOI DATI PRESI DA FIREBASE ⚠️
 const firebaseConfig = {
   apiKey: "AIzaSyDWMtpGtWH5VtwiGgaQn1_rr5FBfRAIpVg",
   authDomain: "euphoria-liste.firebaseapp.com",
@@ -28,9 +40,14 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
 
-// Controlla se l'utente ha inserito le chiavi vere di Firebase
+// Attiva la Cache Locale Persistente per caricamenti istantanei sui dispositivi
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
+
 const isFirebaseConfigured = firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("INCOLLA_QUI");
 
 // ============================================================================
@@ -166,7 +183,9 @@ const CustomDialog = ({ config, onClose }) => {
 
 const PublicView = ({ events, isFetchingEvents, setSelectedEvent, setView, t, lang }) => {
   const now = Date.now();
-  const publicEvents = events.filter(ev => ev.isVisible !== false && (!ev.expiryTimestamp || ev.expiryTimestamp > now));
+  const publicEvents = events
+    .filter(ev => ev.isVisible !== false && (!ev.expiryTimestamp || ev.expiryTimestamp > now))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
 
   return (
     <div className="max-w-5xl mx-auto p-4 space-y-6 md:space-y-8 mb-12">
@@ -179,9 +198,10 @@ const PublicView = ({ events, isFetchingEvents, setSelectedEvent, setView, t, la
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8">
         {isFetchingEvents ? (
-          <div className="col-span-full text-center py-24 border border-[#ebdfc4]/10 rounded-md bg-[#0a101d] shadow-lg animate-fade-in-up">
-            <Hourglass className="w-10 h-10 text-[#cfa968] animate-[spin_3s_linear_infinite] mx-auto mb-6 drop-shadow-[0_0_15px_rgba(207,169,104,0.5)]" />
+          <div className="col-span-full text-center py-24 border border-[#ebdfc4]/10 rounded-md bg-[#0a101d] shadow-lg animate-fade-in">
+            <Hourglass className="w-10 h-10 text-[#cfa968] animate-[spin_3s_linear_infinite] mx-auto mb-6 drop-shadow-[0_0_15px_rgba(207,169,104,0.5)]" strokeWidth={1.5} />
             <h3 className="text-sm font-semibold text-[#ebdfc4] tracking-[0.15em] uppercase">{t('loadingEventsTitle')}</h3>
+            <p className="text-[#ebdfc4]/50 text-xs mt-2 tracking-wider">{t('loadingEventsDesc')}</p>
           </div>
         ) : publicEvents.length === 0 ? (
           <div className="col-span-full text-center py-24 border border-[#ebdfc4]/10 rounded-md bg-[#0a101d] shadow-lg animate-fade-in-up">
@@ -193,7 +213,7 @@ const PublicView = ({ events, isFetchingEvents, setSelectedEvent, setView, t, la
             <div key={ev.id} className={`group flex flex-row md:flex-col bg-[#0a101d] border border-[#ebdfc4]/10 rounded-md overflow-hidden hover:border-[#cfa968]/50 transition-all duration-500 cursor-pointer shadow-xl animate-fade-in-up delay-${Math.min((index + 1) * 100, 500)} hover:-translate-y-1 hover:shadow-[#cfa968]/20`} onClick={() => { setSelectedEvent(ev); setView('register'); }}>
               <div className="w-2/5 md:w-full h-auto md:h-80 min-h-[140px] md:min-h-0 overflow-hidden relative bg-[#05080f] shrink-0 border-r border-[#ebdfc4]/10 md:border-r-0">
                 <div className="absolute inset-0 bg-gradient-to-t from-[#0a101d] via-[#0a101d]/20 to-transparent z-10"></div>
-                <img src={ev.imageUrl || 'https://images.unsplash.com/photo-1566737236500-c8ac43014a67?q=80&w=800&auto=format&fit=crop'} alt={ev.title} className="w-full h-full object-cover opacity-90 group-hover:opacity-100 group-hover:scale-105 transition-all duration-700" />
+                <img src={ev.imageUrl || 'https://images.unsplash.com/photo-1566737236500-c8ac43014a67?q=80&w=800&auto=format&fit=crop'} alt={ev.title} loading="lazy" className="w-full h-full object-cover opacity-90 group-hover:opacity-100 group-hover:scale-105 transition-all duration-700" />
               </div>
               <div className="w-3/5 md:w-full p-4 md:p-6 flex flex-col flex-1 justify-between bg-[#0a101d] relative z-20">
                 <div>
@@ -570,6 +590,7 @@ export default function App() {
   const [dialogConfig, setDialogConfig] = useState(null);
   
   const [events, setEvents] = useState([]);
+  const [isFetchingEvents, setIsFetchingEvents] = useState(true);
   const [prs, setPrs] = useState([]);
   const [prGroups, setPrGroups] = useState([]);
   const [registrations, setRegistrations] = useState([]);
@@ -580,16 +601,28 @@ export default function App() {
   const closeDialog = () => setDialogConfig(null);
 
   useEffect(() => {
-    if (!isFirebaseConfigured) return;
-    signInAnonymously(auth).catch((e) => console.error("Errore Auth:", e));
-  }, []);
+    if (!isFirebaseConfigured) {
+      setIsFetchingEvents(false);
+      return;
+    }
 
-  useEffect(() => {
-    if (!isFirebaseConfigured) return;
-    const unsubEvents = onSnapshot(collection(db, 'artifacts', appId, 'events'), snap => setEvents(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+    // 1. Autenticazione in parallelo (non blocca il caricamento iniziale degli eventi)
+    signInAnonymously(auth).catch((e) => console.error("Errore Auth:", e));
+
+    // 2. Scaricamento prioritario e immediato degli eventi (con supporto cache locale istantanea)
+    const unsubEvents = onSnapshot(collection(db, 'artifacts', appId, 'events'), snap => {
+      setEvents(snap.docs.map(d => ({id: d.id, ...d.data()})));
+      setIsFetchingEvents(false);
+    }, (err) => {
+      console.error("Errore caricamento eventi:", err);
+      setIsFetchingEvents(false);
+    });
+
+    // 3. Scaricamento dati secondari
     const unsubPRs = onSnapshot(collection(db, 'artifacts', appId, 'prs'), snap => setPrs(snap.docs.map(d => ({id: d.id, ...d.data()}))));
     const unsubGroups = onSnapshot(collection(db, 'artifacts', appId, 'pr_groups'), snap => setPrGroups(snap.docs.map(d => ({id: d.id, ...d.data()}))));
     const unsubRegs = onSnapshot(collection(db, 'artifacts', appId, 'registrations'), snap => setRegistrations(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+    
     return () => { unsubEvents(); unsubPRs(); unsubGroups(); unsubRegs(); };
   }, []);
 
@@ -604,16 +637,20 @@ export default function App() {
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#ebdfc4] via-[#cfa968] to-[#ebdfc4] z-[100]"></div>
       <style dangerouslySetInnerHTML={{ __html: customStyles }} />
       <header className="border-b border-[#ebdfc4]/10 bg-[#05080f]/80 backdrop-blur-xl sticky top-0 z-50 animate-fade-in-down mt-1">
-        <div className="max-w-6xl mx-auto px-6 h-24 flex items-center justify-between">
-          <div className="flex items-center cursor-pointer group shrink-0" onClick={() => { if(!isAdminAuth) setView('public'); else setView('admin-dashboard'); }}><span className="font-light text-[#ebdfc4] text-xl md:text-2xl tracking-[0.2em] uppercase drop-shadow-[0_0_15px_rgba(207,169,104,0.2)] group-hover:text-[#cfa968] transition-colors duration-300">VIPLIST</span></div>
-          <div className="flex items-center gap-4 shrink-0">
-            {(!isAdminAuth && !view.startsWith('admin') && !view.startsWith('liste')) && (<div className="flex gap-2"><button onClick={() => setLang('it')} className={`px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] transition-all active:scale-95 ${lang === 'it' ? 'text-[#cfa968] border-b border-[#cfa968]' : 'text-[#ebdfc4]/50 hover:text-[#ebdfc4]'}`}>IT</button><button onClick={() => setLang('en')} className={`px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] transition-all active:scale-95 ${lang === 'en' ? 'text-[#cfa968] border-b border-[#cfa968]' : 'text-[#ebdfc4]/50 hover:text-[#ebdfc4]'}`}>EN</button></div>)}
-            {!isAdminAuth && view !== 'admin-login' && !view.startsWith('liste') && (<div className="flex items-center gap-4 ml-2 pl-4 border-l border-[#ebdfc4]/20"><button onClick={() => setView('liste-events')} className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#ebdfc4]/50 hover:text-[#cfa968] transition-all active:scale-95 flex items-center gap-1.5"><ClipboardList className="w-3 h-3" /> <span className="hidden sm:inline">{t('lists')}</span></button><button onClick={() => setView('admin-login')} className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#ebdfc4]/50 hover:text-[#cfa968] transition-all active:scale-95 flex items-center gap-1.5"><Lock className="w-3 h-3" /> <span className="hidden sm:inline">{t('admin')}</span></button></div>)}
+        <div className="max-w-6xl mx-auto px-6 h-24 flex items-center justify-between gap-4">
+          <div className="flex items-center cursor-pointer group" onClick={() => { if(!isAdminAuth) setView('public'); else setView('admin-dashboard'); }}>
+            <span className="font-light text-[#ebdfc4] text-sm sm:text-lg md:text-xl tracking-[0.15em] md:tracking-[0.2em] uppercase drop-shadow-[0_0_15px_rgba(207,169,104,0.2)] group-hover:text-[#cfa968] transition-colors duration-300 leading-tight">
+              EUPHORIA EVENTS PLANNING
+            </span>
+          </div>
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+            {(!isAdminAuth && !view.startsWith('admin') && !view.startsWith('liste')) && (<div className="flex gap-1.5 sm:gap-2"><button onClick={() => setLang('it')} className={`px-1.5 sm:px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] transition-all active:scale-95 ${lang === 'it' ? 'text-[#cfa968] border-b border-[#cfa968]' : 'text-[#ebdfc4]/50 hover:text-[#ebdfc4]'}`}>IT</button><button onClick={() => setLang('en')} className={`px-1.5 sm:px-2 py-1 text-[9px] font-bold uppercase tracking-[0.1em] transition-all active:scale-95 ${lang === 'en' ? 'text-[#cfa968] border-b border-[#cfa968]' : 'text-[#ebdfc4]/50 hover:text-[#ebdfc4]'}`}>EN</button></div>)}
+            {!isAdminAuth && view !== 'admin-login' && !view.startsWith('liste') && (<div className="flex items-center gap-3 sm:gap-4 ml-1 sm:ml-2 pl-3 sm:pl-4 border-l border-[#ebdfc4]/20"><button onClick={() => setView('liste-events')} className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#ebdfc4]/50 hover:text-[#cfa968] transition-all active:scale-95 flex items-center gap-1.5"><ClipboardList className="w-3.5 h-3.5" /> <span className="hidden sm:inline">{t('lists')}</span></button><button onClick={() => setView('admin-login')} className="text-[9px] font-bold uppercase tracking-[0.2em] text-[#ebdfc4]/50 hover:text-[#cfa968] transition-all active:scale-95 flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" /> <span className="hidden sm:inline">{t('admin')}</span></button></div>)}
           </div>
         </div>
       </header>
       <main className="py-6 px-4 md:px-6">
-        {view === 'public' && <PublicView events={events} setSelectedEvent={setSelectedEvent} setView={setView} t={t} lang={lang} />}
+        {view === 'public' && <PublicView events={events} isFetchingEvents={isFetchingEvents} setSelectedEvent={setSelectedEvent} setView={setView} t={t} lang={lang} />}
         {view === 'register' && <RegistrationForm selectedEvent={selectedEvent} prs={prs} prGroups={prGroups} setView={setView} showDialog={showDialog} t={t} lang={lang} />}
         {view === 'admin-login' && <AdminLogin setIsAdminAuth={setIsAdminAuth} setView={setView} showDialog={showDialog} />}
         {view === 'admin-dashboard' && <AdminDashboard events={events} registrations={registrations} prGroups={prGroups} view={view} setView={setView} setIsAdminAuth={setIsAdminAuth} setSelectedEvent={setSelectedEvent} showDialog={showDialog} />}
