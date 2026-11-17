@@ -3,7 +3,7 @@ import {
   Calendar, Users, PlusCircle, LogOut, ChevronLeft, CheckCircle2,
   Lock, Eye, EyeOff, Clock, Phone, Search, CheckSquare, Square,
   ClipboardList, Pencil, Database, Download, MessageCircle, Send,
-  Trash2, AlertTriangle, UserPlus, FolderTree, BarChart3, Hourglass
+  Trash2, AlertTriangle, UserPlus, FolderTree, BarChart3, Hourglass, Copy
 } from 'lucide-react';
 
 // ============================================================================
@@ -364,6 +364,7 @@ const AdminHeader = ({ view, setView, setIsAdminAuth }) => (
 
 const AdminDashboard = ({ events, registrations, prGroups, view, setView, setIsAdminAuth, setSelectedEvent, showDialog }) => {
   const [editingEventId, setEditingEventId] = useState(null);
+  const [editingEventVisibility, setEditingEventVisibility] = useState(true);
   const [newEventTitle, setNewEventTitle] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
   const [newEventImage, setNewEventImage] = useState('');
@@ -381,7 +382,16 @@ const AdminDashboard = ({ events, registrations, prGroups, view, setView, setIsA
   };
 
   const handleEditClick = (ev) => {
-    setEditingEventId(ev.id); setNewEventTitle(ev.title || ''); setNewEventDate(ev.date || ''); setNewEventImage(ev.imageUrl || ''); setNewEventListPassword(ev.listPassword || ''); setNewEventPrGroupIds(ev.prGroupIds || []); setNewEventAskPhone(ev.askPhone !== false); setNewEventAskEmail(ev.askEmail !== false); setNewEventNotes(ev.notes || '');
+    setEditingEventId(ev.id); 
+    setEditingEventVisibility(ev.isVisible !== false);
+    setNewEventTitle(ev.title || ''); 
+    setNewEventDate(ev.date || ''); 
+    setNewEventImage(ev.imageUrl || ''); 
+    setNewEventListPassword(ev.listPassword || ''); 
+    setNewEventPrGroupIds(ev.prGroupIds || []); 
+    setNewEventAskPhone(ev.askPhone !== false); 
+    setNewEventAskEmail(ev.askEmail !== false); 
+    setNewEventNotes(ev.notes || '');
     if (ev.expiryTimestamp) {
       const d = new Date(ev.expiryTimestamp);
       setNewEventExpiryDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
@@ -390,8 +400,23 @@ const AdminDashboard = ({ events, registrations, prGroups, view, setView, setIsA
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleDuplicateEvent = async (ev) => {
+    try {
+      const { id, createdAt, ...restOfEvent } = ev;
+      await addDoc(collection(db, 'artifacts', appId, 'events'), {
+        ...restOfEvent,
+        title: `Copia di ${ev.title}`,
+        isVisible: false,
+        createdAt: Date.now()
+      });
+    } catch (error) {
+      console.error(error);
+      showDialog("Errore durante la duplicazione dell'evento.");
+    }
+  };
+
   const handleCancelEdit = () => {
-    setEditingEventId(null); setNewEventTitle(''); setNewEventDate(''); setNewEventImage(''); setNewEventListPassword(''); setNewEventPrGroupIds([]); setNewEventExpiryDate(''); setNewEventExpiryTime(''); setNewEventAskPhone(true); setNewEventAskEmail(true); setNewEventNotes('');
+    setEditingEventId(null); setEditingEventVisibility(true); setNewEventTitle(''); setNewEventDate(''); setNewEventImage(''); setNewEventListPassword(''); setNewEventPrGroupIds([]); setNewEventExpiryDate(''); setNewEventExpiryTime(''); setNewEventAskPhone(true); setNewEventAskEmail(true); setNewEventNotes('');
   };
 
   const handleSaveEvent = async (e) => {
@@ -400,7 +425,18 @@ const AdminDashboard = ({ events, registrations, prGroups, view, setView, setIsA
     let expiryTimestamp = null;
     if (newEventExpiryDate && newEventExpiryTime) expiryTimestamp = new Date(`${newEventExpiryDate}T${newEventExpiryTime}`).getTime();
     
-    const eventData = { title: newEventTitle, date: newEventDate, imageUrl: newEventImage, listPassword: newEventListPassword, prGroupIds: newEventPrGroupIds, isVisible: true, expiryTimestamp, askPhone: newEventAskPhone, askEmail: newEventAskEmail, notes: newEventNotes };
+    const eventData = { 
+      title: newEventTitle, 
+      date: newEventDate, 
+      imageUrl: newEventImage, 
+      listPassword: newEventListPassword, 
+      prGroupIds: newEventPrGroupIds, 
+      isVisible: editingEventId ? editingEventVisibility : true, 
+      expiryTimestamp, 
+      askPhone: newEventAskPhone, 
+      askEmail: newEventAskEmail, 
+      notes: newEventNotes 
+    };
     
     try {
       if (editingEventId) await updateDoc(doc(db, 'artifacts', appId, 'events', editingEventId), eventData);
@@ -418,6 +454,9 @@ const AdminDashboard = ({ events, registrations, prGroups, view, setView, setIsA
   const toggleVisibility = async (ev) => {
     try { await updateDoc(doc(db, 'artifacts', appId, 'events', ev.id), { isVisible: !(ev.isVisible !== false) }); } catch (error) { console.error(error); }
   };
+
+  // Ordina mettendo prima i più recenti
+  const sortedEvents = [...events].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
   return (
     <div className="max-w-4xl mx-auto p-4 space-y-12 mb-12">
@@ -450,14 +489,41 @@ const AdminDashboard = ({ events, registrations, prGroups, view, setView, setIsA
       <div>
         <h2 className="text-sm font-medium text-[#ebdfc4] mb-6 uppercase tracking-[0.2em]">Elenco Serate</h2>
         <div className="grid gap-6">
-          {events.map(ev => {
+          {sortedEvents.map(ev => {
             const countIscritti = registrations.filter(r => r.eventId === ev.id && !r.isCancelled).length;
             const isVisible = ev.isVisible !== false;
             const isExpired = ev.expiryTimestamp && ev.expiryTimestamp < Date.now();
             return (
               <div key={ev.id} className={`bg-[#0a101d] border ${isExpired ? 'border-[#cfa968]/30' : 'border-[#ebdfc4]/10'} rounded-md p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-lg group hover:border-[#cfa968]/50 transition-all`}>
-                <div className="flex gap-6 items-center w-full md:w-auto"><div className="w-24 h-24 rounded-sm overflow-hidden bg-[#05080f] border border-[#ebdfc4]/10 relative shrink-0"><img src={ev.imageUrl || 'https://images.unsplash.com/photo-1566737236500-c8ac43014a67?q=80&w=200&auto=format&fit=crop'} alt="locandina" className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${isExpired ? 'opacity-40 grayscale' : 'opacity-100'}`}/>{!isVisible && <div className="absolute inset-0 bg-[#05080f]/80 flex items-center justify-center z-10"><EyeOff className="w-5 h-5 text-[#ebdfc4]/50"/></div>}</div><div><h3 className={`text-lg font-medium uppercase tracking-[0.15em] mb-1 ${isExpired ? 'text-[#ebdfc4]/40' : 'text-[#ebdfc4]'}`}>{ev.title}</h3><div className="text-[#ebdfc4]/50 text-xs tracking-widest uppercase mb-4">{new Date(ev.date).toLocaleDateString('it-IT')}</div><div className="flex flex-wrap gap-4 text-[10px] uppercase tracking-widest font-bold"><div className="text-[#ebdfc4]/50">PWD: <span className="text-[#cfa968]">{ev.listPassword}</span></div>{isExpired && <div className="text-[#cfa968]/80">Scaduto</div>}</div></div></div>
-                <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap border-t md:border-t-0 border-[#ebdfc4]/10 pt-4 md:pt-0 w-full md:w-auto"><div className="flex items-center gap-2"><button onClick={() => toggleVisibility(ev)} title={isVisible ? 'Nascondi' : 'Mostra'} className={`p-3 rounded-sm border transition-colors ${isVisible ? 'bg-[#cfa968]/10 text-[#cfa968] border-[#cfa968]/30 hover:bg-[#cfa968]/20' : 'bg-transparent text-[#ebdfc4]/50 border-[#ebdfc4]/20 hover:text-[#ebdfc4]/80'}`}><Eye className="w-4 h-4"/></button><button onClick={() => handleEditClick(ev)} title="Modifica" className="p-3 rounded-sm border border-[#ebdfc4]/20 text-[#ebdfc4]/50 hover:text-[#cfa968] hover:border-[#cfa968]/50 transition-colors"><Pencil className="w-4 h-4"/></button><button onClick={() => { setSelectedEvent(ev); setView('admin-event-report'); }} title="Report PR" className="p-3 rounded-sm border border-[#ebdfc4]/20 text-[#ebdfc4]/50 hover:text-[#cfa968] hover:border-[#cfa968]/50 transition-colors"><BarChart3 className="w-4 h-4"/></button><button onClick={() => handleDeleteEvent(ev)} title="Elimina" className="p-3 rounded-sm border border-transparent text-[#ebdfc4]/40 hover:text-[#cfa968] hover:bg-[#cfa968]/10 transition-colors"><Trash2 className="w-4 h-4"/></button></div><div className="w-px h-8 bg-[#ebdfc4]/10 hidden md:block"></div><div className="flex items-center justify-between w-full md:w-auto gap-4"><div className="text-[#cfa968] text-xs font-bold tracking-widest px-2"><Users className="w-4 h-4 inline mr-2 text-[#ebdfc4]/50"/>{countIscritti}</div><button onClick={() => { setSelectedEvent(ev); setView('admin-event-details'); }} className="bg-[#ebdfc4]/10 hover:bg-[#ebdfc4]/20 text-[#ebdfc4] px-6 py-3 rounded-sm text-[10px] font-bold uppercase tracking-[0.15em] transition-colors whitespace-nowrap">Liste</button></div></div>
+                <div className="flex gap-6 items-center w-full md:w-auto">
+                  <div className="w-24 h-24 rounded-sm overflow-hidden bg-[#05080f] border border-[#ebdfc4]/10 relative shrink-0">
+                    <img src={ev.imageUrl || 'https://images.unsplash.com/photo-1566737236500-c8ac43014a67?q=80&w=200&auto=format&fit=crop'} alt="locandina" className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${isExpired || !isVisible ? 'opacity-40 grayscale' : 'opacity-100'}`}/>
+                    {!isVisible && <div className="absolute inset-0 bg-[#05080f]/80 flex items-center justify-center z-10"><EyeOff className="w-5 h-5 text-[#ebdfc4]/50"/></div>}
+                  </div>
+                  <div>
+                    <h3 className={`text-lg font-medium uppercase tracking-[0.15em] mb-1 ${isExpired || !isVisible ? 'text-[#ebdfc4]/50' : 'text-[#ebdfc4]'}`}>{ev.title}</h3>
+                    <div className="text-[#ebdfc4]/50 text-xs tracking-widest uppercase mb-4">{new Date(ev.date).toLocaleDateString('it-IT')}</div>
+                    <div className="flex flex-wrap gap-4 text-[10px] uppercase tracking-widest font-bold">
+                      <div className="text-[#ebdfc4]/50">PWD: <span className="text-[#cfa968]">{ev.listPassword}</span></div>
+                      {!isVisible && <div className="text-[#ebdfc4]/40 border border-[#ebdfc4]/20 px-2 py-0.5 rounded-sm">Nascosto</div>}
+                      {isExpired && <div className="text-[#cfa968]/80">Scaduto</div>}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap border-t md:border-t-0 border-[#ebdfc4]/10 pt-4 md:pt-0 w-full md:w-auto">
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => toggleVisibility(ev)} title={isVisible ? 'Nascondi' : 'Rendi Visibile'} className={`p-3 rounded-sm border transition-colors ${isVisible ? 'bg-[#cfa968]/10 text-[#cfa968] border-[#cfa968]/30 hover:bg-[#cfa968]/20' : 'bg-transparent text-[#ebdfc4]/50 border-[#ebdfc4]/20 hover:text-[#ebdfc4]/80'}`}>{isVisible ? <Eye className="w-4 h-4"/> : <EyeOff className="w-4 h-4"/>}</button>
+                    <button onClick={() => handleEditClick(ev)} title="Modifica" className="p-3 rounded-sm border border-[#ebdfc4]/20 text-[#ebdfc4]/50 hover:text-[#cfa968] hover:border-[#cfa968]/50 transition-colors"><Pencil className="w-4 h-4"/></button>
+                    <button onClick={() => handleDuplicateEvent(ev)} title="Duplica Evento" className="p-3 rounded-sm border border-[#ebdfc4]/20 text-[#ebdfc4]/50 hover:text-[#cfa968] hover:border-[#cfa968]/50 transition-colors"><Copy className="w-4 h-4"/></button>
+                    <button onClick={() => { setSelectedEvent(ev); setView('admin-event-report'); }} title="Report PR" className="p-3 rounded-sm border border-[#ebdfc4]/20 text-[#ebdfc4]/50 hover:text-[#cfa968] hover:border-[#cfa968]/50 transition-colors"><BarChart3 className="w-4 h-4"/></button>
+                    <button onClick={() => handleDeleteEvent(ev)} title="Elimina" className="p-3 rounded-sm border border-transparent text-[#ebdfc4]/40 hover:text-[#cfa968] hover:bg-[#cfa968]/10 transition-colors"><Trash2 className="w-4 h-4"/></button>
+                  </div>
+                  <div className="w-px h-8 bg-[#ebdfc4]/10 hidden md:block"></div>
+                  <div className="flex items-center justify-between w-full md:w-auto gap-4">
+                    <div className="text-[#cfa968] text-xs font-bold tracking-widest px-2"><Users className="w-4 h-4 inline mr-2 text-[#ebdfc4]/50"/>{countIscritti}</div>
+                    <button onClick={() => { setSelectedEvent(ev); setView('admin-event-details'); }} className="bg-[#ebdfc4]/10 hover:bg-[#ebdfc4]/20 text-[#ebdfc4] px-6 py-3 rounded-sm text-[10px] font-bold uppercase tracking-[0.15em] transition-colors whitespace-nowrap">Liste</button>
+                  </div>
+                </div>
               </div>
             );
           })}
